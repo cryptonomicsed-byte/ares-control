@@ -40,6 +40,7 @@ DAEMON_REGISTRY: dict[str, Category] = {
     "ares-degen-alpha-fusion.service": Category.INTEL,
     "ares-degen-loop.service": Category.INTEL,
     "ares-frankenstream.service": Category.INTEL,
+    "ares-control-notify.service": Category.BRIDGE,
     "ares-freqtrade-bridge.service": Category.BRIDGE,
     "ares-freqtrade.service": Category.EXECUTION,
     "ares-jupiter-signer.service": Category.EXECUTION,

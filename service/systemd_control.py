@@ -44,3 +44,40 @@ def query_status(unit_name: str) -> tuple[str, str]:
         return "unknown", "unknown"
     except Exception:  # noqa: BLE001
         return "unknown", "unknown"
+
+
+_HEALTH_PROPERTIES = [
+    "ActiveState", "SubState", "MemoryCurrent", "TasksCurrent",
+    "NRestarts", "CPUUsageNSec", "MainPID", "ActiveEnterTimestamp",
+]
+
+
+def query_health(unit_name: str) -> dict:
+    """Deeper per-unit snapshot for the dashboard: memory/tasks/restarts/CPU."""
+    try:
+        result = subprocess.run(
+            ["systemctl", "show", unit_name, f"--property={','.join(_HEALTH_PROPERTIES)}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        out = {}
+        for line in result.stdout.strip().split("\n"):
+            if "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            out[key] = value
+        mem = out.get("MemoryCurrent", "[not set]")
+        cpu_ns = out.get("CPUUsageNSec", "[not set]")
+        return {
+            "active_state": out.get("ActiveState", "unknown"),
+            "sub_state": out.get("SubState", "unknown"),
+            "memory_bytes": int(mem) if mem.isdigit() else None,
+            "tasks_current": int(out["TasksCurrent"]) if out.get("TasksCurrent", "").isdigit() else None,
+            "n_restarts": int(out["NRestarts"]) if out.get("NRestarts", "").isdigit() else None,
+            "cpu_usage_ns": int(cpu_ns) if cpu_ns.isdigit() else None,
+            "main_pid": out.get("MainPID"),
+            "active_enter_timestamp": out.get("ActiveEnterTimestamp") or None,
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"active_state": "unknown", "sub_state": "unknown", "error": str(exc)}

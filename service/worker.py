@@ -24,15 +24,32 @@ import sys
 import time
 from contextlib import suppress
 
+import urllib.error
+import urllib.request
+
 from daemons import DAEMON_REGISTRY, requires_approval
 from database import get_db_connection, init_database
-from systemd_control import query_status, run_action
+from systemd_control import query_health, run_action
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 STATUS_POLL_INTERVAL_SECONDS = int(os.getenv("ARES_CONTROL_STATUS_POLL_SECONDS", "30"))
 TOGGLE_POLL_INTERVAL_SECONDS = int(os.getenv("ARES_CONTROL_TOGGLE_POLL_SECONDS", "3"))
+HEALTH_ENDPOINT_POLL_INTERVAL_SECONDS = int(os.getenv("ARES_CONTROL_HEALTH_ENDPOINT_POLL_SECONDS", "30"))
+
+# Services that expose their own HTTP health/liveness endpoint -- polled
+# separately from systemd unit state, since "active/running" doesn't
+# prove the app inside is actually responding (see: the connection-pool
+# incident, where vantage.service stayed "active" for minutes while
+# genuinely unresponsive).
+HEALTH_ENDPOINTS: dict[str, str] = {
+    "vantage": "http://localhost:8001/api/health",
+    "frankenstream": "http://localhost:3034/api/health",
+    "poolhealth": "http://localhost:8004/",
+    "wigolo": "http://10.88.0.1:3334/",
+    "opencode": "http://localhost:18888/",
+}
 
 
 def _acquire_file_lock():
@@ -102,22 +119,73 @@ async def poll_daemon_status(stop_event: asyncio.Event) -> None:
         conn = get_db_connection()
         try:
             for unit_name in DAEMON_REGISTRY:
-                active_state, sub_state = query_status(unit_name)
+                h = query_health(unit_name)
                 conn.execute(
                     """
-                    INSERT INTO daemon_status_cache (unit_name, active_state, sub_state, checked_at)
-                    VALUES (?, ?, ?, datetime('now'))
+                    INSERT INTO daemon_status_cache
+                        (unit_name, active_state, sub_state, memory_bytes, tasks_current,
+                         n_restarts, cpu_usage_ns, main_pid, active_enter_timestamp, checked_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                     ON CONFLICT(unit_name) DO UPDATE SET
                         active_state=excluded.active_state,
                         sub_state=excluded.sub_state,
+                        memory_bytes=excluded.memory_bytes,
+                        tasks_current=excluded.tasks_current,
+                        n_restarts=excluded.n_restarts,
+                        cpu_usage_ns=excluded.cpu_usage_ns,
+                        main_pid=excluded.main_pid,
+                        active_enter_timestamp=excluded.active_enter_timestamp,
                         checked_at=excluded.checked_at
                     """,
-                    (unit_name, active_state, sub_state),
+                    (
+                        unit_name, h.get("active_state", "unknown"), h.get("sub_state", "unknown"),
+                        h.get("memory_bytes"), h.get("tasks_current"), h.get("n_restarts"),
+                        h.get("cpu_usage_ns"), h.get("main_pid"), h.get("active_enter_timestamp"),
+                    ),
                 )
             conn.commit()
         finally:
             conn.close()
         await asyncio.sleep(STATUS_POLL_INTERVAL_SECONDS)
+
+
+def _check_health_endpoint(url: str, timeout: float = 5.0) -> dict:
+    start = time.monotonic()
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            elapsed_ms = (time.monotonic() - start) * 1000
+            return {"http_code": resp.status, "response_time_ms": round(elapsed_ms, 1), "ok": True, "error": None}
+    except urllib.error.HTTPError as exc:
+        elapsed_ms = (time.monotonic() - start) * 1000
+        # A non-2xx response still proves the process is alive and listening.
+        return {"http_code": exc.code, "response_time_ms": round(elapsed_ms, 1), "ok": True, "error": None}
+    except Exception as exc:  # noqa: BLE001
+        elapsed_ms = (time.monotonic() - start) * 1000
+        return {"http_code": None, "response_time_ms": round(elapsed_ms, 1), "ok": False, "error": str(exc)}
+
+
+async def poll_health_endpoints(stop_event: asyncio.Event) -> None:
+    while not stop_event.is_set():
+        conn = get_db_connection()
+        try:
+            for name, url in HEALTH_ENDPOINTS.items():
+                result = _check_health_endpoint(url)
+                conn.execute(
+                    """
+                    INSERT INTO health_endpoint_cache
+                        (name, url, http_code, response_time_ms, ok, error, checked_at)
+                    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+                    ON CONFLICT(name) DO UPDATE SET
+                        url=excluded.url, http_code=excluded.http_code,
+                        response_time_ms=excluded.response_time_ms,
+                        ok=excluded.ok, error=excluded.error, checked_at=excluded.checked_at
+                    """,
+                    (name, url, result["http_code"], result["response_time_ms"], int(result["ok"]), result["error"]),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+        await asyncio.sleep(HEALTH_ENDPOINT_POLL_INTERVAL_SECONDS)
 
 
 async def main() -> None:
@@ -142,6 +210,7 @@ async def main() -> None:
         await asyncio.gather(
             process_pending_toggles(stop_event),
             poll_daemon_status(stop_event),
+            poll_health_endpoints(stop_event),
         )
     finally:
         _release_file_lock(lock_handle)

@@ -47,6 +47,34 @@ def init_database() -> None:
                 unit_name TEXT PRIMARY KEY,
                 active_state TEXT NOT NULL,
                 sub_state TEXT NOT NULL,
+                memory_bytes INTEGER,
+                tasks_current INTEGER,
+                n_restarts INTEGER,
+                cpu_usage_ns INTEGER,
+                main_pid TEXT,
+                active_enter_timestamp TEXT,
+                checked_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        # Backfill columns for DBs created before this schema existed.
+        existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(daemon_status_cache)")}
+        for col, coltype in [
+            ("memory_bytes", "INTEGER"), ("tasks_current", "INTEGER"),
+            ("n_restarts", "INTEGER"), ("cpu_usage_ns", "INTEGER"),
+            ("main_pid", "TEXT"), ("active_enter_timestamp", "TEXT"),
+        ]:
+            if col not in existing_cols:
+                conn.execute(f"ALTER TABLE daemon_status_cache ADD COLUMN {col} {coltype}")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS health_endpoint_cache (
+                name TEXT PRIMARY KEY,
+                url TEXT NOT NULL,
+                http_code INTEGER,
+                response_time_ms REAL,
+                ok INTEGER NOT NULL DEFAULT 0,
+                error TEXT,
                 checked_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
             """
