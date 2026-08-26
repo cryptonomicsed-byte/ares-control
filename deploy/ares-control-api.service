@@ -1,0 +1,16 @@
+[Unit]
+Description=ares-control API (HTTP-only, no background work)
+After=network.target
+
+[Service]
+ExecStart=/opt/ares-control/venv/bin/python /opt/ares-control/service/main.py
+Restart=on-failure
+RestartSec=5
+WorkingDirectory=/opt/ares-control/service
+EnvironmentFile=/opt/ares-control/.env
+User=root
+# Deliberately no CPU/nice tuning here -- this process is meant to
+# always win contention against the worker so /health never starves.
+
+[Install]
+WantedBy=multi-user.target
