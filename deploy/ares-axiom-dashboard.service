@@ -1,0 +1,14 @@
+[Unit]
+Description=ares-axiom-dashboard — AXIOM Galaxy 3D agent graph dashboard (Omo-Koda2)
+After=network.target ares-omokoda.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ares/axiom-git-pull/dist
+ExecStart=/usr/bin/python3 -m http.server 8876
+Restart=on-failure
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
