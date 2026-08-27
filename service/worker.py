@@ -102,7 +102,15 @@ async def process_pending_toggles(stop_event: asyncio.Event) -> None:
                 conn.execute("UPDATE toggle_requests SET status='processing' WHERE id=?", (row["id"],))
                 conn.commit()
 
-                ok, error = run_action(unit_name, action)
+                # Off the event loop: run_action can now be a multi-second
+                # SSH round trip (remote units), and process_pending_toggles
+                # shares this loop with poll_daemon_status via asyncio.gather
+                # -- a blocking call here would freeze both, starving new
+                # toggle requests behind whatever the status poll happens to
+                # be doing (observed directly during the 2026-08-27 migration:
+                # a toggle sat 'pending' for tens of seconds behind an
+                # in-flight status query for an unrelated unit).
+                ok, error = await asyncio.to_thread(run_action, unit_name, action)
                 logger.info("toggle %s %s -> ok=%s error=%s", action, unit_name, ok, error)
                 conn.execute(
                     "UPDATE toggle_requests SET status=?, error=?, processed_at=datetime('now') WHERE id=?",
@@ -115,11 +123,18 @@ async def process_pending_toggles(stop_event: asyncio.Event) -> None:
 
 
 async def poll_daemon_status(stop_event: asyncio.Event) -> None:
+    # One commit per unit, not one for the whole pass. As of the
+    # 2026-08-27 multi-host migration, most units are queried over SSH
+    # (seconds each, not milliseconds), so a single end-of-loop commit
+    # held a write-lock open for minutes at a time -- the exact same
+    # antipattern that caused the wallet_learner.py WAL-lock incident
+    # earlier the same night. The API's own toggle-request INSERT was
+    # getting starved out with "database is locked" as a result.
     while not stop_event.is_set():
-        conn = get_db_connection()
-        try:
-            for unit_name in DAEMON_REGISTRY:
-                h = query_health(unit_name)
+        for unit_name in DAEMON_REGISTRY:
+            h = await asyncio.to_thread(query_health, unit_name)
+            conn = get_db_connection()
+            try:
                 conn.execute(
                     """
                     INSERT INTO daemon_status_cache
@@ -143,9 +158,9 @@ async def poll_daemon_status(stop_event: asyncio.Event) -> None:
                         h.get("cpu_usage_ns"), h.get("main_pid"), h.get("active_enter_timestamp"),
                     ),
                 )
-            conn.commit()
-        finally:
-            conn.close()
+                conn.commit()
+            finally:
+                conn.close()
         await asyncio.sleep(STATUS_POLL_INTERVAL_SECONDS)
 
 

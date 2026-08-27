@@ -1,11 +1,36 @@
 """
-Thin wrapper around systemctl. Only ever called from worker.py (root,
-on hostinger-vps) -- never from the API process.
+Thin wrapper around systemctl. Only ever called from worker.py (root).
+
+As of the 2026-08-27 migration, worker.py itself runs on Contabo, but most
+of the fleet still runs on hostinger-vps -- so most calls here go out over
+SSH rather than running systemctl in-process. daemons.host_for(unit_name)
+decides which; "local" runs systemctl directly, anything else is an SSH
+host alias (see ~/.ssh/config -- must already have a working, non-
+interactive (key-based) entry).
 """
 
 import subprocess
 
-from daemons import all_units
+from daemons import all_units, host_for
+
+SSH_KEY = "/root/.ssh/ares_control_remote"
+SSH_TIMEOUT_PADDING = 10  # extra seconds of slack on top of the systemctl call's own timeout, for SSH connection setup itself
+
+
+def _run(unit_name: str, argv: list[str], timeout: int) -> subprocess.CompletedProcess:
+    """Run a systemctl argv either locally or over SSH, depending on where
+    this unit actually lives. The remote command is quoted as a single
+    string for the SSH-side shell, not passed as argv, since SSH always
+    hands the remote end one string regardless of how it's invoked here."""
+    host = host_for(unit_name)
+    if host == "local":
+        return subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+    remote_cmd = " ".join(argv)
+    return subprocess.run(
+        ["ssh", "-i", SSH_KEY, "-o", "BatchMode=yes", "-o", f"ConnectTimeout={SSH_TIMEOUT_PADDING}",
+         host, remote_cmd],
+        capture_output=True, text=True, timeout=timeout + SSH_TIMEOUT_PADDING,
+    )
 
 
 def run_action(unit_name: str, action: str) -> tuple[bool, str]:
@@ -14,17 +39,12 @@ def run_action(unit_name: str, action: str) -> tuple[bool, str]:
     if action not in ("start", "stop"):
         return False, f"invalid action: {action}"
     try:
-        result = subprocess.run(
-            ["systemctl", action, unit_name],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        result = _run(unit_name, ["systemctl", action, unit_name], timeout=30)
         if result.returncode != 0:
             return False, result.stderr.strip() or f"systemctl {action} exited {result.returncode}"
         return True, ""
     except subprocess.TimeoutExpired:
-        return False, "systemctl call timed out after 30s"
+        return False, "systemctl call timed out (including SSH round trip for remote units)"
     except Exception as exc:  # noqa: BLE001
         return False, str(exc)
 
@@ -32,10 +52,9 @@ def run_action(unit_name: str, action: str) -> tuple[bool, str]:
 def query_status(unit_name: str) -> tuple[str, str]:
     """Returns (active_state, sub_state), e.g. ('active', 'running')."""
     try:
-        result = subprocess.run(
+        result = _run(
+            unit_name,
             ["systemctl", "show", unit_name, "--property=ActiveState,SubState", "--value"],
-            capture_output=True,
-            text=True,
             timeout=10,
         )
         lines = result.stdout.strip().split("\n")
@@ -55,10 +74,9 @@ _HEALTH_PROPERTIES = [
 def query_health(unit_name: str) -> dict:
     """Deeper per-unit snapshot for the dashboard: memory/tasks/restarts/CPU."""
     try:
-        result = subprocess.run(
+        result = _run(
+            unit_name,
             ["systemctl", "show", unit_name, f"--property={','.join(_HEALTH_PROPERTIES)}"],
-            capture_output=True,
-            text=True,
             timeout=10,
         )
         out = {}

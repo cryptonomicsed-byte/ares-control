@@ -22,6 +22,20 @@ class Category(str, Enum):
     EXECUTION = "execution"  # places orders / signs transactions -- gated
 
 
+# "local" = the box ares-control's own worker process runs on (Contabo, as
+# of the 2026-08-27 migration off hostinger-vps). Everything else is
+# reached over SSH -- see systemd_control.py. Default is "hostinger-vps"
+# since that's still where the vast majority of the fleet actually runs;
+# only list a unit here if it's NOT there.
+DAEMON_HOSTS: dict[str, str] = {
+    "ares-kanban-core.service": "local",
+}
+
+
+def host_for(unit_name: str) -> str:
+    return DAEMON_HOSTS.get(unit_name, "hostinger-vps")
+
+
 # Real unit names, confirmed live via `systemctl list-unit-files` on
 # hostinger-vps 2026-08-25. Keep this in sync by re-running that command --
 # do not hand-edit names without verifying against the box.
@@ -73,6 +87,8 @@ DAEMON_REGISTRY: dict[str, Category] = {
     "ares-social-tracker.service": Category.INTEL,
     "ares-specialist-worker.service": Category.INTEL,
     "ares-stack.service": Category.INTEL,
+    "ares-strategy-lab-hub.service": Category.INTEL,
+    "ares-kanban-core.service": Category.INTEL,
     "ares-stix-ingester.service": Category.INTEL,
     "ares-stix-scanner.service": Category.INTEL,
     "ares-stix-webhook.service": Category.BRIDGE,
