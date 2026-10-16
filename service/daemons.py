@@ -20,6 +20,14 @@ class Category(str, Enum):
     DASHBOARD = "dashboard"  # read-only display, safe to toggle
     BACKUP = "backup"        # scheduled backup jobs
     EXECUTION = "execution"  # places orders / signs transactions -- gated
+    # Cannot place an order even if it tried, because its execution path raises
+    # NotImplementedError by construction. Safe to toggle without approval --
+    # but it is NOT merely "intel": it is trade-shaped research whose output is
+    # decisions, and labelling it intel would hide that from the next reader.
+    # If anyone ever fills in that executor, this unit must be re-categorised
+    # to EXECUTION in the same commit, or the gate is bypassed by a change
+    # somewhere else entirely.
+    PAPER = "paper"          # simulates; no key can reach a venue
 
 
 # "local" = the box ares-control's own worker process runs on (Contabo, as
@@ -58,6 +66,7 @@ DAEMON_REGISTRY: dict[str, Category] = {
     "ares-axiom-dashboard.service": Category.DASHBOARD,
     "ares-freqtrade-bridge.service": Category.BRIDGE,
     "ares-freqtrade.service": Category.EXECUTION,
+    "ares-grokbot-paper.service": Category.PAPER,
     "ares-jupiter-signer.service": Category.EXECUTION,
     "ares-loom.service": Category.INTEL,
     "ares-metabase-mirror.service": Category.BACKUP,
