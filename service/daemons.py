@@ -126,6 +126,20 @@ DAEMON_REGISTRY: dict[str, Category] = {
     "ares-wallet-learner.service": Category.INTEL,
     "ares-wigolo.service": Category.INTEL,
     "ares-worldmonitor-bridge.service": Category.BRIDGE,
+
+    # ── P1-16: Vantage trading-integration services ─────────────────────────
+    # Every new service starts paper-only and is registered as INTEL or BRIDGE,
+    # never EXECUTION (handoff rule 3: nothing here places a live order).
+    # Units are created by their tickets: ares-crucible (P1-17), the curve
+    # listener / runner / confluence jobs (P3), the guild router and the
+    # mycelium resolver (P2), and the quant engine (P4-14).
+    "ares-crucible.service": Category.BRIDGE,        # oracle seam / scoring, MCP bridge
+    "ares-curve-listener.service": Category.INTEL,   # Solana bonding-curve -> curve_trades
+    "ares-runner-jobs.service": Category.INTEL,      # $1M runner backtrace jobs
+    "ares-confluence.service": Category.INTEL,       # confluence ping when wallets/KOLs converge
+    "ares-guild-router.service": Category.BRIDGE,    # Grokbot/Muse/Q task -> validated intel_record
+    "ares-mycelium-resolver.service": Category.BRIDGE,# record pricing / source_hit_rate
+    "ares-quant-julia.service": Category.INTEL,      # Julia quant engine (non-repainting indicators)
 }
 
 
