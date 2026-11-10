@@ -1,12 +1,9 @@
 """
 Thin wrapper around systemctl. Only ever called from worker.py (root).
 
-As of the 2026-08-27 migration, worker.py itself runs on Contabo, but most
-of the fleet still runs on hostinger-vps -- so most calls here go out over
-SSH rather than running systemctl in-process. daemons.host_for(unit_name)
-decides which; "local" runs systemctl directly, anything else is an SSH
-host alias (see ~/.ssh/config -- must already have a working, non-
-interactive (key-based) entry).
+daemons.host_for(unit_name) decides where each unit runs: "local" (the
+default) runs systemctl in-process; anything else is an SSH host alias
+(see ~/.ssh/config -- must have a working, non-interactive key-based entry).
 """
 
 import subprocess

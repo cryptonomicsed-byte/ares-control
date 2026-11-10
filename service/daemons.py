@@ -1,5 +1,5 @@
 """
-Registry of controllable ares-* systemd units on hostinger-vps.
+Registry of controllable ares-* systemd units (run locally on Contabo unless DAEMON_HOSTS says otherwise).
 
 Pattern verified against HKUDS/AI-Trader (service/server/tasks.py's
 BACKGROUND_TASK_REGISTRY) -- a single source-of-truth dict, not scattered
@@ -30,18 +30,17 @@ class Category(str, Enum):
     PAPER = "paper"          # simulates; no key can reach a venue
 
 
-# "local" = the box ares-control's own worker process runs on (Contabo, as
-# of the 2026-08-27 migration off hostinger-vps). Everything else is
-# reached over SSH -- see systemd_control.py. Default is "hostinger-vps"
-# since that's still where the vast majority of the fleet actually runs;
-# only list a unit here if it's NOT there.
+# "local" = the box ares-control's own worker process runs on (Contabo).
+# Anything else is an SSH host alias reached via systemd_control.py.
+# Default is "local": as of 2026-11-10 the fleet runs here and hostinger-vps
+# no longer resolves. Only list a unit here if it lives on another host.
 DAEMON_HOSTS: dict[str, str] = {
     "ares-kanban-core.service": "local",
 }
 
 
 def host_for(unit_name: str) -> str:
-    return DAEMON_HOSTS.get(unit_name, "hostinger-vps")
+    return DAEMON_HOSTS.get(unit_name, "local")
 
 
 # Real unit names, confirmed live via `systemctl list-unit-files` on
