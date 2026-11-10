@@ -123,8 +123,12 @@ DAEMON_REGISTRY: dict[str, Category] = {
     "ares-vibe-mcp-server.service": Category.BRIDGE,
     "ares-wallet-intel.service": Category.INTEL,
     "ares-wallet-learner.service": Category.INTEL,
+    # waggled substrate on 127.0.0.1:7779 -- Vantage emit_signal + kernel waggle client
+    "ares-waggled.service": Category.BRIDGE,
     "ares-wigolo.service": Category.INTEL,
     "ares-worldmonitor-bridge.service": Category.BRIDGE,
+    # ZANGBETO enforcement bridge on 127.0.0.1:8787 -- kernel/Vantage enforce, review, canary-trips
+    "ares-zangbeto.service": Category.BRIDGE,
 
     # ── P1-16: Vantage trading-integration services ─────────────────────────
     # Every new service starts paper-only and is registered as INTEL or BRIDGE,
